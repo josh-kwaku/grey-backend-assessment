@@ -74,12 +74,13 @@ type paymentDTO struct {
 	DestCurrency    string           `json:"dest_currency"`
 	ExchangeRate    *decimal.Decimal `json:"exchange_rate"`
 	FeeAmount       int64            `json:"fee_amount"`
+	FeeCurrency     *string          `json:"fee_currency,omitempty"`
 	CreatedAt       time.Time        `json:"created_at"`
 	CompletedAt     *time.Time       `json:"completed_at,omitempty"`
 }
 
 func toPaymentDTO(p *domain.Payment) paymentDTO {
-	return paymentDTO{
+	dto := paymentDTO{
 		ID:              p.ID,
 		Type:            string(p.Type),
 		Status:          string(p.Status),
@@ -94,6 +95,11 @@ func toPaymentDTO(p *domain.Payment) paymentDTO {
 		CreatedAt:       p.CreatedAt,
 		CompletedAt:     p.CompletedAt,
 	}
+	if p.FeeCurrency != nil {
+		c := string(*p.FeeCurrency)
+		dto.FeeCurrency = &c
+	}
+	return dto
 }
 
 func (h *PaymentHandler) Create(w http.ResponseWriter, r *http.Request) {

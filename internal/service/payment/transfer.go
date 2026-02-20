@@ -52,8 +52,10 @@ func (s *Service) CreateInternalTransfer(ctx context.Context, req InternalTransf
 		"payment_id", p.ID,
 		"sender_account", senderAcct.ID,
 		"recipient_account", recipientAcct.ID,
-		"amount", req.Amount,
-		"currency", req.SourceCurrency,
+		"source_amount", req.Amount,
+		"source_currency", req.SourceCurrency,
+		"dest_amount", p.DestAmount,
+		"dest_currency", req.DestCurrency,
 	)
 
 	return p, true, nil
@@ -112,10 +114,6 @@ func (s *Service) validateTransfer(req InternalTransferRequest, sender, recipien
 		return fmt.Errorf("validateTransfer: %w", domain.ErrInvalidAmount)
 	}
 
-	if req.SourceCurrency != req.DestCurrency {
-		return fmt.Errorf("validateTransfer: %w", domain.ErrCrossCurrencyUnsupported)
-	}
-
 	if sender.UserID == recipient.UserID && req.SourceCurrency == req.DestCurrency {
 		return fmt.Errorf("validateTransfer: %w", domain.ErrSelfTransfer)
 	}
@@ -142,28 +140,35 @@ func (s *Service) validateTransfer(req InternalTransferRequest, sender, recipien
 }
 
 func (s *Service) executeTransfer(ctx context.Context, req InternalTransferRequest, senderID, recipientID uuid.UUID) (*domain.Payment, error) {
+	if req.SourceCurrency != req.DestCurrency {
+		return s.executeCrossCurrencyTransfer(ctx, req, senderID, recipientID)
+	}
+	return s.executeSameCurrencyTransfer(ctx, req, senderID, recipientID)
+}
+
+func (s *Service) executeSameCurrencyTransfer(ctx context.Context, req InternalTransferRequest, senderID, recipientID uuid.UUID) (*domain.Payment, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("executeTransfer: begin tx: %w", err)
+		return nil, fmt.Errorf("executeSameCurrencyTransfer: begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
 	locked, err := lockAccountsInOrder(ctx, tx, s.accounts, senderID, recipientID)
 	if err != nil {
-		return nil, fmt.Errorf("executeTransfer: %w", err)
+		return nil, fmt.Errorf("executeSameCurrencyTransfer: %w", err)
 	}
 
 	sender, recipient := locked[senderID], locked[recipientID]
 
 	if err := verifyAccountActive(sender, "sender"); err != nil {
-		return nil, fmt.Errorf("executeTransfer: %w", err)
+		return nil, fmt.Errorf("executeSameCurrencyTransfer: %w", err)
 	}
 	if err := verifyAccountActive(recipient, "recipient"); err != nil {
-		return nil, fmt.Errorf("executeTransfer: %w", err)
+		return nil, fmt.Errorf("executeSameCurrencyTransfer: %w", err)
 	}
 
 	if sender.Balance < req.Amount {
-		return nil, fmt.Errorf("executeTransfer: %w", domain.ErrInsufficientFunds)
+		return nil, fmt.Errorf("executeSameCurrencyTransfer: %w", domain.ErrInsufficientFunds)
 	}
 
 	now := time.Now().UTC()
@@ -184,26 +189,26 @@ func (s *Service) executeTransfer(ctx context.Context, req InternalTransferReque
 	}
 
 	if err := s.payments.Create(ctx, tx, p); err != nil {
-		return nil, fmt.Errorf("executeTransfer: create payment: %w", err)
+		return nil, fmt.Errorf("executeSameCurrencyTransfer: create payment: %w", err)
 	}
 
 	if err := s.writeLedgerEntries(ctx, tx, p, sender, recipient); err != nil {
-		return nil, fmt.Errorf("executeTransfer: %w", err)
+		return nil, fmt.Errorf("executeSameCurrencyTransfer: %w", err)
 	}
 
 	if err := s.writePaymentEvent(ctx, tx, p.ID, req.SenderUserID, now); err != nil {
-		return nil, fmt.Errorf("executeTransfer: %w", err)
+		return nil, fmt.Errorf("executeSameCurrencyTransfer: %w", err)
 	}
 
 	if err := s.accounts.UpdateBalance(ctx, tx, senderID, sender.Balance-req.Amount, sender.Version+1); err != nil {
-		return nil, fmt.Errorf("executeTransfer: update sender: %w", err)
+		return nil, fmt.Errorf("executeSameCurrencyTransfer: update sender: %w", err)
 	}
 	if err := s.accounts.UpdateBalance(ctx, tx, recipientID, recipient.Balance+req.Amount, recipient.Version+1); err != nil {
-		return nil, fmt.Errorf("executeTransfer: update recipient: %w", err)
+		return nil, fmt.Errorf("executeSameCurrencyTransfer: update recipient: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("executeTransfer: commit: %w", err)
+		return nil, fmt.Errorf("executeSameCurrencyTransfer: commit: %w", err)
 	}
 
 	return p, nil

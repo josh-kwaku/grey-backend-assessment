@@ -8,7 +8,9 @@ ISSUES.md
 # Documentation (excluded for now)
 docs/
 
-# Go
+# Go binaries
+/api
+/mock-provider
 bin/
 *.exe
 *.exe~

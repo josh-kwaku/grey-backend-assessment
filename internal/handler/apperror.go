@@ -33,5 +33,4 @@ var (
 	ErrVersionConflict          = &AppError{http.StatusConflict, "VERSION_CONFLICT", "Resource was modified concurrently, please retry"}
 	ErrMissingIdempotencyKey    = &AppError{http.StatusBadRequest, "MISSING_IDEMPOTENCY_KEY", "Idempotency-Key header is required"}
 	ErrInvalidAmount            = &AppError{http.StatusBadRequest, "INVALID_AMOUNT", "Amount must be greater than zero"}
-	ErrCrossCurrencyUnsupported = &AppError{http.StatusUnprocessableEntity, "CROSS_CURRENCY_UNSUPPORTED", "Cross-currency transfers not yet supported"}
 )

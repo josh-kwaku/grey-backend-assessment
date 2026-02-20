@@ -8,7 +8,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/josh-kwaku/grey-backend-assessment/internal/config"
 	"github.com/josh-kwaku/grey-backend-assessment/internal/domain"
+	"github.com/josh-kwaku/grey-backend-assessment/internal/fx"
 )
+
+var SystemUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 type paymentRepo interface {
 	Create(ctx context.Context, tx *sql.Tx, payment *domain.Payment) error
@@ -35,12 +38,17 @@ type userRepo interface {
 	GetByUniqueName(ctx context.Context, uniqueName string) (*domain.User, error)
 }
 
+type fxService interface {
+	Convert(ctx context.Context, amount int64, from, to domain.Currency) (*fx.Conversion, error)
+}
+
 type Service struct {
 	payments paymentRepo
 	accounts accountRepo
 	ledger   ledgerRepo
 	events   eventRepo
 	users    userRepo
+	fx       fxService
 	db       *sql.DB
 	config   *config.Config
 }
@@ -51,6 +59,7 @@ func NewService(
 	ledger ledgerRepo,
 	events eventRepo,
 	users userRepo,
+	fxSvc fxService,
 	db *sql.DB,
 	cfg *config.Config,
 ) *Service {
@@ -60,6 +69,7 @@ func NewService(
 		ledger:   ledger,
 		events:   events,
 		users:    users,
+		fx:       fxSvc,
 		db:       db,
 		config:   cfg,
 	}

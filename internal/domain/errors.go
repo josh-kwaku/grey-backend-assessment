@@ -17,5 +17,4 @@ var (
 	ErrAccountClosed            = errors.New("account closed")
 	ErrCurrencyMismatch         = errors.New("currency mismatch")
 	ErrVersionConflict          = errors.New("optimistic lock conflict")
-	ErrCrossCurrencyUnsupported = errors.New("cross-currency transfers not yet supported")
 )

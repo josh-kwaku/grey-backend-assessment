@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/josh-kwaku/grey-backend-assessment/internal/config"
+	"github.com/josh-kwaku/grey-backend-assessment/internal/fx"
 	"github.com/josh-kwaku/grey-backend-assessment/internal/handler"
 	"github.com/josh-kwaku/grey-backend-assessment/internal/logging"
 	"github.com/josh-kwaku/grey-backend-assessment/internal/middleware"
@@ -50,13 +51,16 @@ func main() {
 	ledgerRepo := repository.NewLedgerRepository(db)
 	paymentEventRepo := repository.NewPaymentEventRepository(db)
 
+	fxSvc := fx.NewRateService(cfg.FXSpreadPct)
+
 	accountSvc := service.NewAccountService(accountRepo, userRepo)
-	paymentSvc := payment.NewService(paymentRepo, accountRepo, ledgerRepo, paymentEventRepo, userRepo, db, cfg)
+	paymentSvc := payment.NewService(paymentRepo, accountRepo, ledgerRepo, paymentEventRepo, userRepo, fxSvc, db, cfg)
 
 	authHandler := handler.NewAuthHandler(userRepo, cfg.JWTSecret, 24*time.Hour)
 	userHandler := handler.NewUserHandler(userRepo)
 	accountHandler := handler.NewAccountHandler(accountSvc)
 	paymentHandler := handler.NewPaymentHandler(paymentSvc)
+	fxHandler := handler.NewFXHandler(fxSvc)
 
 	authMW := middleware.Auth(cfg.JWTSecret)
 
@@ -72,6 +76,8 @@ func main() {
 
 	mux.Handle("POST /api/v1/payments", authMW(http.HandlerFunc(paymentHandler.Create)))
 	mux.Handle("GET /api/v1/payments/{id}", authMW(http.HandlerFunc(paymentHandler.Get)))
+
+	mux.Handle("GET /api/v1/fx/rates", authMW(http.HandlerFunc(fxHandler.GetRate)))
 
 	stack := middleware.Tracing(middleware.Logging(middleware.Recovery(mux)))
 
