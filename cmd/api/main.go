@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -50,17 +51,25 @@ func main() {
 	paymentRepo := repository.NewPaymentRepository(db)
 	ledgerRepo := repository.NewLedgerRepository(db)
 	paymentEventRepo := repository.NewPaymentEventRepository(db)
+	webhookEventRepo := repository.NewWebhookEventRepository(db)
 
 	fxSvc := fx.NewRateService(cfg.FXSpreadPct)
+	providerClient := service.NewProviderClient(cfg.MockProviderURL, cfg.WebhookCallbackURL)
 
 	accountSvc := service.NewAccountService(accountRepo, userRepo)
-	paymentSvc := payment.NewService(paymentRepo, accountRepo, ledgerRepo, paymentEventRepo, userRepo, fxSvc, db, cfg)
+	paymentSvc := payment.NewService(paymentRepo, accountRepo, ledgerRepo, paymentEventRepo, userRepo, fxSvc, providerClient, db, cfg)
+
+	webhookProcessor := service.NewWebhookProcessor(
+		webhookEventRepo, paymentRepo, accountRepo, ledgerRepo, paymentEventRepo,
+		db, slog.Default(), 1*time.Second,
+	)
 
 	authHandler := handler.NewAuthHandler(userRepo, cfg.JWTSecret, 24*time.Hour)
 	userHandler := handler.NewUserHandler(userRepo)
 	accountHandler := handler.NewAccountHandler(accountSvc)
 	paymentHandler := handler.NewPaymentHandler(paymentSvc)
 	fxHandler := handler.NewFXHandler(fxSvc)
+	webhookHandler := handler.NewWebhookHandler(webhookEventRepo, cfg.WebhookSecret)
 
 	authMW := middleware.Auth(cfg.JWTSecret)
 
@@ -75,9 +84,12 @@ func main() {
 	mux.Handle("GET /api/v1/users/{id}/accounts", authMW(http.HandlerFunc(accountHandler.List)))
 
 	mux.Handle("POST /api/v1/payments", authMW(http.HandlerFunc(paymentHandler.Create)))
+	mux.Handle("POST /api/v1/payments/external", authMW(http.HandlerFunc(paymentHandler.CreateExternal)))
 	mux.Handle("GET /api/v1/payments/{id}", authMW(http.HandlerFunc(paymentHandler.Get)))
 
 	mux.Handle("GET /api/v1/fx/rates", authMW(http.HandlerFunc(fxHandler.GetRate)))
+
+	mux.HandleFunc("POST /api/v1/webhooks/provider", webhookHandler.ReceiveProviderWebhook)
 
 	stack := middleware.Tracing(middleware.Logging(middleware.Recovery(mux)))
 
@@ -90,6 +102,14 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+
+	processorCtx, processorCancel := context.WithCancel(context.Background())
+	var processorWg sync.WaitGroup
+	processorWg.Add(1)
+	go func() {
+		defer processorWg.Done()
+		webhookProcessor.Start(processorCtx)
+	}()
 
 	go func() {
 		slog.Info("server started", "addr", addr)
@@ -104,6 +124,9 @@ func main() {
 	<-quit
 
 	slog.Info("shutting down server")
+	processorCancel()
+	processorWg.Wait()
+
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 

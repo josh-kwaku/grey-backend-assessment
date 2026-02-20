@@ -35,10 +35,9 @@ func (r *WebhookEventRepository) Create(ctx context.Context, event *domain.Webho
 }
 
 func (r *WebhookEventRepository) GetPending(ctx context.Context, limit int) ([]domain.WebhookEvent, error) {
-	// FOR UPDATE SKIP LOCKED prevents multiple processors from claiming the same event
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+webhookEventColumns+` FROM webhook_events
-		WHERE status = $1 ORDER BY created_at LIMIT $2 FOR UPDATE SKIP LOCKED`,
+		WHERE status = $1 ORDER BY created_at LIMIT $2`,
 		domain.WebhookEventStatusPending, limit,
 	)
 	if err != nil {

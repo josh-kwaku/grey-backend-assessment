@@ -42,6 +42,18 @@ type fxService interface {
 	Convert(ctx context.Context, amount int64, from, to domain.Currency) (*fx.Conversion, error)
 }
 
+type ProviderRequest struct {
+	PaymentID    uuid.UUID
+	Amount       int64
+	Currency     domain.Currency
+	DestIBAN     string
+	DestBankName string
+}
+
+type providerClient interface {
+	SubmitPayment(ctx context.Context, req ProviderRequest) error
+}
+
 type Service struct {
 	payments paymentRepo
 	accounts accountRepo
@@ -49,6 +61,7 @@ type Service struct {
 	events   eventRepo
 	users    userRepo
 	fx       fxService
+	provider providerClient
 	db       *sql.DB
 	config   *config.Config
 }
@@ -60,6 +73,7 @@ func NewService(
 	events eventRepo,
 	users userRepo,
 	fxSvc fxService,
+	provider providerClient,
 	db *sql.DB,
 	cfg *config.Config,
 ) *Service {
@@ -70,6 +84,7 @@ func NewService(
 		events:   events,
 		users:    users,
 		fx:       fxSvc,
+		provider: provider,
 		db:       db,
 		config:   cfg,
 	}

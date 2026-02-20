@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/shopspring/decimal"
 
 	"github.com/josh-kwaku/grey-backend-assessment/internal/domain"
@@ -47,6 +48,10 @@ func (r *PaymentRepository) Create(ctx context.Context, tx *sql.Tx, payment *dom
 		payment.CreatedAt, payment.UpdatedAt, payment.CompletedAt,
 	)
 	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" && pqErr.Constraint == "idx_payments_idempotency_key" {
+			return fmt.Errorf("Create: %w", domain.ErrDuplicateIdempotencyKey)
+		}
 		return fmt.Errorf("Create: %w", err)
 	}
 	return nil
@@ -80,11 +85,11 @@ func (r *PaymentRepository) GetByIdempotencyKey(ctx context.Context, key string)
 	return p, nil
 }
 
-func (r *PaymentRepository) UpdateStatus(ctx context.Context, tx *sql.Tx, id uuid.UUID, status domain.PaymentStatus, failureReason *string, completedAt *time.Time) error {
+func (r *PaymentRepository) UpdateStatus(ctx context.Context, tx *sql.Tx, id uuid.UUID, status domain.PaymentStatus, providerRef *string, failureReason *string, completedAt *time.Time) error {
 	res, err := tx.ExecContext(ctx,
-		`UPDATE payments SET status = $1, failure_reason = $2, completed_at = $3, updated_at = now()
-		WHERE id = $4`,
-		status, failureReason, completedAt, id,
+		`UPDATE payments SET status = $1, provider_ref = $2, failure_reason = $3, completed_at = $4, updated_at = now()
+		WHERE id = $5 AND status NOT IN ('completed', 'failed', 'reversed')`,
+		status, providerRef, failureReason, completedAt, id,
 	)
 	if err != nil {
 		return fmt.Errorf("UpdateStatus: %w", err)
@@ -95,7 +100,7 @@ func (r *PaymentRepository) UpdateStatus(ctx context.Context, tx *sql.Tx, id uui
 		return fmt.Errorf("UpdateStatus: rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("UpdateStatus: %w", domain.ErrNotFound)
+		return fmt.Errorf("UpdateStatus: %w", domain.ErrPaymentTerminal)
 	}
 	return nil
 }

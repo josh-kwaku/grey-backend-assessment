@@ -90,6 +90,8 @@ func RespondDomainError(w http.ResponseWriter, err error) {
 		appErr = ErrVersionConflict
 	case errors.Is(err, domain.ErrInvalidAmount):
 		appErr = ErrInvalidAmount
+	case errors.Is(err, domain.ErrInvalidRequest):
+		appErr = ErrInvalidRequest
 	default:
 		slog.Error("unhandled domain error", "error", err)
 		appErr = ErrInternalError

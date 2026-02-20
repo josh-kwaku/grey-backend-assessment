@@ -17,4 +17,7 @@ var (
 	ErrAccountClosed            = errors.New("account closed")
 	ErrCurrencyMismatch         = errors.New("currency mismatch")
 	ErrVersionConflict          = errors.New("optimistic lock conflict")
+	ErrInvalidRequest           = errors.New("invalid request")
+	ErrPaymentTerminal          = errors.New("payment already in terminal state")
+	ErrDuplicateIdempotencyKey  = errors.New("duplicate idempotency key")
 )

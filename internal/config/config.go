@@ -10,8 +10,9 @@ type Config struct {
 	DatabaseURL     string  `env:"DATABASE_URL,required"`
 	JWTSecret       string  `env:"JWT_SECRET,required"`
 	FXSpreadPct     float64 `env:"FX_SPREAD_PCT" envDefault:"0.005"`
-	MockProviderURL string  `env:"MOCK_PROVIDER_URL" envDefault:"http://mock-provider:8081"`
-	WebhookSecret   string  `env:"WEBHOOK_SECRET,required"`
+	MockProviderURL    string  `env:"MOCK_PROVIDER_URL" envDefault:"http://mock-provider:8081"`
+	WebhookCallbackURL string  `env:"WEBHOOK_CALLBACK_URL" envDefault:"http://app:8080/api/v1/webhooks/provider"`
+	WebhookSecret      string  `env:"WEBHOOK_SECRET,required"`
 	Port            int     `env:"PORT" envDefault:"8080"`
 	LogLevel        string  `env:"LOG_LEVEL" envDefault:"info"`
 	AppEnv          string  `env:"APP_ENV" envDefault:"production"`

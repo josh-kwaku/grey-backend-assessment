@@ -45,6 +45,17 @@ func (s *Service) CreateInternalTransfer(ctx context.Context, req InternalTransf
 
 	p, err := s.executeTransfer(ctx, req, senderAcct.ID, recipientAcct.ID)
 	if err != nil {
+		if errors.Is(err, domain.ErrDuplicateIdempotencyKey) {
+			existing, idempErr := s.checkIdempotency(ctx, req, senderAcct.ID, recipientAcct.ID)
+			if idempErr != nil {
+				return nil, false, fmt.Errorf("CreateInternalTransfer: %w", idempErr)
+			}
+			if existing != nil {
+				log.Info("idempotent replay (race)", "payment_id", existing.ID, "idempotency_key", req.IdempotencyKey)
+				return existing, false, nil
+			}
+			return nil, false, fmt.Errorf("CreateInternalTransfer: %w", domain.ErrDuplicatePayment)
+		}
 		return nil, false, fmt.Errorf("CreateInternalTransfer: %w", err)
 	}
 
@@ -196,7 +207,7 @@ func (s *Service) executeSameCurrencyTransfer(ctx context.Context, req InternalT
 		return nil, fmt.Errorf("executeSameCurrencyTransfer: %w", err)
 	}
 
-	if err := s.writePaymentEvent(ctx, tx, p.ID, req.SenderUserID, now); err != nil {
+	if err := s.writePaymentEvent(ctx, tx, p.ID, domain.PaymentEventTypeCompleted, req.SenderUserID, now); err != nil {
 		return nil, fmt.Errorf("executeSameCurrencyTransfer: %w", err)
 	}
 
@@ -258,11 +269,11 @@ func (s *Service) writeLedgerEntries(ctx context.Context, tx *sql.Tx, p *domain.
 	return nil
 }
 
-func (s *Service) writePaymentEvent(ctx context.Context, tx *sql.Tx, paymentID, actorUserID uuid.UUID, now time.Time) error {
+func (s *Service) writePaymentEvent(ctx context.Context, tx *sql.Tx, paymentID uuid.UUID, eventType domain.PaymentEventType, actorUserID uuid.UUID, now time.Time) error {
 	event := &domain.PaymentEvent{
 		ID:        uuid.New(),
 		PaymentID: paymentID,
-		EventType: domain.PaymentEventTypeCompleted,
+		EventType: eventType,
 		Actor:     fmt.Sprintf("user:%s", actorUserID),
 		CreatedAt: now,
 	}

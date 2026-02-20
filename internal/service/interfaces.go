@@ -28,7 +28,7 @@ type paymentRepository interface {
 	Create(ctx context.Context, tx *sql.Tx, payment *domain.Payment) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Payment, error)
 	GetByIdempotencyKey(ctx context.Context, key string) (*domain.Payment, error)
-	UpdateStatus(ctx context.Context, tx *sql.Tx, id uuid.UUID, status domain.PaymentStatus, failureReason *string, completedAt *time.Time) error
+	UpdateStatus(ctx context.Context, tx *sql.Tx, id uuid.UUID, status domain.PaymentStatus, providerRef *string, failureReason *string, completedAt *time.Time) error
 }
 
 type ledgerRepository interface {

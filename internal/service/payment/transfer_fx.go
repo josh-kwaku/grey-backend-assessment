@@ -85,7 +85,7 @@ func (s *Service) executeCrossCurrencyTransfer(ctx context.Context, req Internal
 		return nil, fmt.Errorf("executeCrossCurrencyTransfer: %w", err)
 	}
 
-	if err := s.writePaymentEvent(ctx, tx, p.ID, req.SenderUserID, now); err != nil {
+	if err := s.writePaymentEvent(ctx, tx, p.ID, domain.PaymentEventTypeCompleted, req.SenderUserID, now); err != nil {
 		return nil, fmt.Errorf("executeCrossCurrencyTransfer: %w", err)
 	}
 
