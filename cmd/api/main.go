@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,10 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	_ "github.com/lib/pq"
-
 	"github.com/josh-kwaku/grey-backend-assessment/internal/config"
+	"github.com/josh-kwaku/grey-backend-assessment/internal/handler"
 	"github.com/josh-kwaku/grey-backend-assessment/internal/logging"
+	"github.com/josh-kwaku/grey-backend-assessment/internal/middleware"
+	"github.com/josh-kwaku/grey-backend-assessment/internal/repository"
 )
 
 func main() {
@@ -27,20 +27,42 @@ func main() {
 
 	logging.Init("grey-api", cfg.LogLevel, cfg.AppEnv)
 
-	db, err := connectDB(cfg.DatabaseURL)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	db, err := repository.NewPostgresDB(ctx, cfg.DatabaseURL, repository.PoolConfig{
+		MaxOpenConns:     cfg.DBMaxOpenConns,
+		MaxIdleConns:     cfg.DBMaxIdleConns,
+		ConnMaxLifetimeS: cfg.DBConnMaxLifetimeS,
+		ConnMaxIdleTimeS: cfg.DBConnMaxIdleTimeS,
+	})
 	if err != nil {
 		slog.Error("failed to connect to database", "error", err)
 		os.Exit(1)
 	}
 	defer db.Close()
 
+	userRepo := repository.NewUserRepository(db)
+
+	authHandler := handler.NewAuthHandler(userRepo, cfg.JWTSecret, 24*time.Hour)
+	userHandler := handler.NewUserHandler(userRepo)
+
+	authMW := middleware.Auth(cfg.JWTSecret)
+
 	mux := http.NewServeMux()
+
 	mux.HandleFunc("GET /health", handleHealth)
+	mux.HandleFunc("GET /health/ready", handleHealth)
+	mux.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
+
+	mux.Handle("GET /api/v1/users/{id}", authMW(http.HandlerFunc(userHandler.GetByID)))
+
+	stack := middleware.Tracing(middleware.Logging(middleware.Recovery(mux)))
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           stack,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -60,10 +82,10 @@ func main() {
 	<-quit
 
 	slog.Info("shutting down server")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("server forced to shutdown", "error", err)
 		os.Exit(1)
 	}
@@ -75,22 +97,4 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
 		slog.Error("failed to write health response", "error", err)
 	}
-}
-
-func connectDB(dsn string) (*sql.DB, error) {
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("connectDB: %w", err)
-	}
-
-	for i := range 30 {
-		if err = db.Ping(); err == nil {
-			return db, nil
-		}
-		slog.Info("waiting for database", "attempt", i+1)
-		time.Sleep(time.Second)
-	}
-
-	db.Close()
-	return nil, fmt.Errorf("connectDB: gave up after 30 attempts: %w", err)
 }
