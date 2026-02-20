@@ -16,6 +16,7 @@ import (
 	"github.com/josh-kwaku/grey-backend-assessment/internal/logging"
 	"github.com/josh-kwaku/grey-backend-assessment/internal/middleware"
 	"github.com/josh-kwaku/grey-backend-assessment/internal/repository"
+	"github.com/josh-kwaku/grey-backend-assessment/internal/service"
 )
 
 func main() {
@@ -43,9 +44,13 @@ func main() {
 	defer db.Close()
 
 	userRepo := repository.NewUserRepository(db)
+	accountRepo := repository.NewAccountRepository(db)
+
+	accountSvc := service.NewAccountService(accountRepo, userRepo)
 
 	authHandler := handler.NewAuthHandler(userRepo, cfg.JWTSecret, 24*time.Hour)
 	userHandler := handler.NewUserHandler(userRepo)
+	accountHandler := handler.NewAccountHandler(accountSvc)
 
 	authMW := middleware.Auth(cfg.JWTSecret)
 
@@ -56,6 +61,8 @@ func main() {
 	mux.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
 
 	mux.Handle("GET /api/v1/users/{id}", authMW(http.HandlerFunc(userHandler.GetByID)))
+	mux.Handle("POST /api/v1/users/{id}/accounts", authMW(http.HandlerFunc(accountHandler.Create)))
+	mux.Handle("GET /api/v1/users/{id}/accounts", authMW(http.HandlerFunc(accountHandler.List)))
 
 	stack := middleware.Tracing(middleware.Logging(middleware.Recovery(mux)))
 

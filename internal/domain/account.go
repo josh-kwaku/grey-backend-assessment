@@ -14,6 +14,15 @@ const (
 	CurrencyGBP Currency = "GBP"
 )
 
+func (c Currency) IsValid() bool {
+	switch c {
+	case CurrencyUSD, CurrencyEUR, CurrencyGBP:
+		return true
+	default:
+		return false
+	}
+}
+
 type AccountType string
 
 const (

@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-	"github.com/josh-kwaku/grey-backend-assessment/internal/auth"
 	"github.com/josh-kwaku/grey-backend-assessment/internal/domain"
+	"github.com/josh-kwaku/grey-backend-assessment/internal/logging"
 )
 
 type userGetter interface {
@@ -22,25 +22,15 @@ func NewUserHandler(users userGetter) *UserHandler {
 }
 
 func (h *UserHandler) GetByID(w http.ResponseWriter, r *http.Request) {
-	authUserID, ok := auth.UserIDFromContext(r.Context())
-	if !ok {
-		RespondAppError(w, ErrMissingToken, nil)
+	userID, appErr := ownerFromPath(r)
+	if appErr != nil {
+		RespondAppError(w, appErr, nil)
 		return
 	}
 
-	id, err := uuid.Parse(r.PathValue("id"))
+	user, err := h.users.GetByID(r.Context(), userID)
 	if err != nil {
-		RespondAppError(w, ErrResourceNotFound, nil)
-		return
-	}
-
-	if id != authUserID {
-		RespondAppError(w, ErrResourceNotFound, nil)
-		return
-	}
-
-	user, err := h.users.GetByID(r.Context(), id)
-	if err != nil {
+		logging.FromContext(r.Context()).Error("failed to get user", "error", err)
 		RespondDomainError(w, err)
 		return
 	}

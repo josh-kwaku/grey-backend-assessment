@@ -52,12 +52,13 @@ func (r *AccountRepository) GetByUserAndCurrency(ctx context.Context, userID uui
 	return a, nil
 }
 
-func (r *AccountRepository) GetByUserID(ctx context.Context, userID uuid.UUID) ([]domain.Account, error) {
+func (r *AccountRepository) GetByUserIDAndType(ctx context.Context, userID uuid.UUID, accountType domain.AccountType) ([]domain.Account, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+accountColumns+` FROM accounts WHERE user_id = $1 ORDER BY created_at`, userID,
+		`SELECT `+accountColumns+` FROM accounts WHERE user_id = $1 AND account_type = $2 ORDER BY created_at`,
+		userID, accountType,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("GetByUserID: %w", err)
+		return nil, fmt.Errorf("GetByUserIDAndType: %w", err)
 	}
 	defer rows.Close()
 
@@ -65,12 +66,12 @@ func (r *AccountRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (
 	for rows.Next() {
 		a, err := scanAccount(rows)
 		if err != nil {
-			return nil, fmt.Errorf("GetByUserID: scan: %w", err)
+			return nil, fmt.Errorf("GetByUserIDAndType: scan: %w", err)
 		}
 		accounts = append(accounts, *a)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("GetByUserID: rows: %w", err)
+		return nil, fmt.Errorf("GetByUserIDAndType: rows: %w", err)
 	}
 	return accounts, nil
 }
