@@ -22,41 +22,24 @@ type InternalTransferRequest struct {
 	IdempotencyKey      string
 }
 
-func (s *Service) CreateInternalTransfer(ctx context.Context, req InternalTransferRequest) (result *domain.Payment, created bool, err error) {
+func (s *Service) CreateInternalTransfer(ctx context.Context, req InternalTransferRequest) (*domain.Payment, error) {
 	log := logging.FromContext(ctx)
 
 	senderAcct, recipientAcct, err := s.resolveTransferAccounts(ctx, req)
 	if err != nil {
-		return nil, false, fmt.Errorf("CreateInternalTransfer: %w", err)
-	}
-
-	existing, err := s.checkIdempotency(ctx, req, senderAcct.ID, recipientAcct.ID)
-	if err != nil {
-		return nil, false, fmt.Errorf("CreateInternalTransfer: %w", err)
-	}
-	if existing != nil {
-		log.Info("idempotent replay", "payment_id", existing.ID, "idempotency_key", req.IdempotencyKey)
-		return existing, false, nil
+		return nil, fmt.Errorf("CreateInternalTransfer: %w", err)
 	}
 
 	if err := s.validateTransfer(req, senderAcct, recipientAcct); err != nil {
-		return nil, false, fmt.Errorf("CreateInternalTransfer: %w", err)
+		return nil, fmt.Errorf("CreateInternalTransfer: %w", err)
 	}
 
 	p, err := s.executeTransfer(ctx, req, senderAcct.ID, recipientAcct.ID)
 	if err != nil {
 		if errors.Is(err, domain.ErrDuplicateIdempotencyKey) {
-			existing, idempErr := s.checkIdempotency(ctx, req, senderAcct.ID, recipientAcct.ID)
-			if idempErr != nil {
-				return nil, false, fmt.Errorf("CreateInternalTransfer: %w", idempErr)
-			}
-			if existing != nil {
-				log.Info("idempotent replay (race)", "payment_id", existing.ID, "idempotency_key", req.IdempotencyKey)
-				return existing, false, nil
-			}
-			return nil, false, fmt.Errorf("CreateInternalTransfer: %w", domain.ErrDuplicatePayment)
+			return nil, fmt.Errorf("CreateInternalTransfer: %w", domain.ErrDuplicatePayment)
 		}
-		return nil, false, fmt.Errorf("CreateInternalTransfer: %w", err)
+		return nil, fmt.Errorf("CreateInternalTransfer: %w", err)
 	}
 
 	log.Info("internal transfer completed",
@@ -69,28 +52,9 @@ func (s *Service) CreateInternalTransfer(ctx context.Context, req InternalTransf
 		"dest_currency", req.DestCurrency,
 	)
 
-	return p, true, nil
+	return p, nil
 }
 
-func (s *Service) checkIdempotency(ctx context.Context, req InternalTransferRequest, senderAcctID, recipientAcctID uuid.UUID) (*domain.Payment, error) {
-	existing, err := s.payments.GetByIdempotencyKey(ctx, req.IdempotencyKey)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("checkIdempotency: %w", err)
-	}
-
-	if existing.SourceAccountID == senderAcctID &&
-		existing.DestAccountID != nil && *existing.DestAccountID == recipientAcctID &&
-		existing.SourceAmount == req.Amount &&
-		existing.SourceCurrency == req.SourceCurrency &&
-		existing.DestCurrency == req.DestCurrency {
-		return existing, nil
-	}
-
-	return nil, fmt.Errorf("checkIdempotency: %w", domain.ErrDuplicatePayment)
-}
 
 func (s *Service) resolveTransferAccounts(ctx context.Context, req InternalTransferRequest) (*domain.Account, *domain.Account, error) {
 	recipient, err := s.users.GetByUniqueName(ctx, req.RecipientUniqueName)

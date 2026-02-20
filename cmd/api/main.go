@@ -52,6 +52,7 @@ func main() {
 	ledgerRepo := repository.NewLedgerRepository(db)
 	paymentEventRepo := repository.NewPaymentEventRepository(db)
 	webhookEventRepo := repository.NewWebhookEventRepository(db)
+	idempotencyRepo := repository.NewIdempotencyRepository(db)
 
 	fxSvc := fx.NewRateService(cfg.FXSpreadPct)
 	providerClient := service.NewProviderClient(cfg.MockProviderURL, cfg.WebhookCallbackURL)
@@ -72,6 +73,7 @@ func main() {
 	webhookHandler := handler.NewWebhookHandler(webhookEventRepo, cfg.WebhookSecret)
 
 	authMW := middleware.Auth(cfg.JWTSecret)
+	idempotencyMW := middleware.Idempotency(idempotencyRepo)
 
 	mux := http.NewServeMux()
 
@@ -83,8 +85,8 @@ func main() {
 	mux.Handle("POST /api/v1/users/{id}/accounts", authMW(http.HandlerFunc(accountHandler.Create)))
 	mux.Handle("GET /api/v1/users/{id}/accounts", authMW(http.HandlerFunc(accountHandler.List)))
 
-	mux.Handle("POST /api/v1/payments", authMW(http.HandlerFunc(paymentHandler.Create)))
-	mux.Handle("POST /api/v1/payments/external", authMW(http.HandlerFunc(paymentHandler.CreateExternal)))
+	mux.Handle("POST /api/v1/payments", authMW(idempotencyMW(http.HandlerFunc(paymentHandler.Create))))
+	mux.Handle("POST /api/v1/payments/external", authMW(idempotencyMW(http.HandlerFunc(paymentHandler.CreateExternal))))
 	mux.Handle("GET /api/v1/payments/{id}", authMW(http.HandlerFunc(paymentHandler.Get)))
 
 	mux.Handle("GET /api/v1/fx/rates", authMW(http.HandlerFunc(fxHandler.GetRate)))

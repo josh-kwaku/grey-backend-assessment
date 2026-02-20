@@ -30,7 +30,7 @@ CREATE TABLE payments (
     completed_at          TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX idx_payments_idempotency_key ON payments (idempotency_key);
+CREATE UNIQUE INDEX idx_payments_idempotency_key ON payments (idempotency_key, source_account_id);
 CREATE INDEX idx_payments_source_account ON payments (source_account_id);
 CREATE INDEX idx_payments_dest_account ON payments (dest_account_id);
 CREATE INDEX idx_payments_status ON payments (status);

@@ -17,7 +17,7 @@ import (
 )
 
 type paymentService interface {
-	CreateInternalTransfer(ctx context.Context, req payment.InternalTransferRequest) (*domain.Payment, bool, error)
+	CreateInternalTransfer(ctx context.Context, req payment.InternalTransferRequest) (*domain.Payment, error)
 	CreateExternalPayout(ctx context.Context, req payment.ExternalPayoutRequest) (*domain.Payment, error)
 	GetPaymentForUser(ctx context.Context, paymentID, userID uuid.UUID) (*domain.Payment, error)
 }
@@ -155,10 +155,6 @@ func (h *PaymentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	idempotencyKey := r.Header.Get("Idempotency-Key")
-	if idempotencyKey == "" {
-		RespondAppError(w, ErrMissingIdempotencyKey, nil)
-		return
-	}
 
 	var req createPaymentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -171,7 +167,7 @@ func (h *PaymentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p, created, err := h.payments.CreateInternalTransfer(r.Context(), payment.InternalTransferRequest{
+	p, err := h.payments.CreateInternalTransfer(r.Context(), payment.InternalTransferRequest{
 		SenderUserID:        userID,
 		RecipientUniqueName: req.RecipientUniqueName,
 		SourceCurrency:      domain.Currency(req.SourceCurrency),
@@ -185,13 +181,8 @@ func (h *PaymentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status := http.StatusOK
-	if created {
-		status = http.StatusCreated
-		w.Header().Set("Location", fmt.Sprintf("/api/v1/payments/%s", p.ID))
-	}
-
-	RespondSuccess(w, status, toPaymentDTO(p))
+	w.Header().Set("Location", fmt.Sprintf("/api/v1/payments/%s", p.ID))
+	RespondSuccess(w, http.StatusCreated, toPaymentDTO(p))
 }
 
 func (h *PaymentHandler) CreateExternal(w http.ResponseWriter, r *http.Request) {
@@ -204,10 +195,6 @@ func (h *PaymentHandler) CreateExternal(w http.ResponseWriter, r *http.Request) 
 	}
 
 	idempotencyKey := r.Header.Get("Idempotency-Key")
-	if idempotencyKey == "" {
-		RespondAppError(w, ErrMissingIdempotencyKey, nil)
-		return
-	}
 
 	var req createExternalPayoutRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

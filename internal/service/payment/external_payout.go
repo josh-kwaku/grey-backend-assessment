@@ -35,15 +35,6 @@ func (s *Service) CreateExternalPayout(ctx context.Context, req ExternalPayoutRe
 		return nil, fmt.Errorf("CreateExternalPayout: %w", err)
 	}
 
-	existing, err := s.checkExternalPayoutIdempotency(ctx, req, senderAcct.ID)
-	if err != nil {
-		return nil, fmt.Errorf("CreateExternalPayout: %w", err)
-	}
-	if existing != nil {
-		log.Info("idempotent replay", "payment_id", existing.ID, "idempotency_key", req.IdempotencyKey)
-		return existing, nil
-	}
-
 	if err := s.validateExternalPayout(req, senderAcct); err != nil {
 		return nil, fmt.Errorf("CreateExternalPayout: %w", err)
 	}
@@ -51,14 +42,6 @@ func (s *Service) CreateExternalPayout(ctx context.Context, req ExternalPayoutRe
 	p, err := s.executeExternalPayout(ctx, req, senderAcct.ID)
 	if err != nil {
 		if errors.Is(err, domain.ErrDuplicateIdempotencyKey) {
-			existing, idempErr := s.checkExternalPayoutIdempotency(ctx, req, senderAcct.ID)
-			if idempErr != nil {
-				return nil, fmt.Errorf("CreateExternalPayout: %w", idempErr)
-			}
-			if existing != nil {
-				log.Info("idempotent replay (race)", "payment_id", existing.ID, "idempotency_key", req.IdempotencyKey)
-				return existing, nil
-			}
 			return nil, fmt.Errorf("CreateExternalPayout: %w", domain.ErrDuplicatePayment)
 		}
 		return nil, fmt.Errorf("CreateExternalPayout: %w", err)
@@ -78,25 +61,6 @@ func (s *Service) CreateExternalPayout(ctx context.Context, req ExternalPayoutRe
 	return p, nil
 }
 
-func (s *Service) checkExternalPayoutIdempotency(ctx context.Context, req ExternalPayoutRequest, senderAcctID uuid.UUID) (*domain.Payment, error) {
-	existing, err := s.payments.GetByIdempotencyKey(ctx, req.IdempotencyKey)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("checkExternalPayoutIdempotency: %w", err)
-	}
-
-	if existing.SourceAccountID == senderAcctID &&
-		existing.SourceAmount == req.Amount &&
-		existing.SourceCurrency == req.SourceCurrency &&
-		existing.DestCurrency == req.DestCurrency &&
-		existing.Type == domain.PaymentTypeExternalPayout {
-		return existing, nil
-	}
-
-	return nil, fmt.Errorf("checkExternalPayoutIdempotency: %w", domain.ErrDuplicatePayment)
-}
 
 func (s *Service) validateExternalPayout(req ExternalPayoutRequest, sender *domain.Account) error {
 	if req.Amount <= 0 {

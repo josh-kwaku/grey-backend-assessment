@@ -32,5 +32,6 @@ var (
 	ErrCurrencyMismatch  = &AppError{http.StatusUnprocessableEntity, "CURRENCY_MISMATCH", "Currency mismatch"}
 	ErrVersionConflict          = &AppError{http.StatusConflict, "VERSION_CONFLICT", "Resource was modified concurrently, please retry"}
 	ErrMissingIdempotencyKey    = &AppError{http.StatusBadRequest, "MISSING_IDEMPOTENCY_KEY", "Idempotency-Key header is required"}
+	ErrIdempotencyConflict      = &AppError{http.StatusConflict, "IDEMPOTENCY_CONFLICT", "Idempotency key already used with a different request"}
 	ErrInvalidAmount            = &AppError{http.StatusBadRequest, "INVALID_AMOUNT", "Amount must be greater than zero"}
 )

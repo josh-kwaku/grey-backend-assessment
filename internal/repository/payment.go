@@ -71,19 +71,6 @@ func (r *PaymentRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.
 	return p, nil
 }
 
-func (r *PaymentRepository) GetByIdempotencyKey(ctx context.Context, key string) (*domain.Payment, error) {
-	row := r.db.QueryRowContext(ctx,
-		`SELECT `+paymentColumns+` FROM payments WHERE idempotency_key = $1`, key,
-	)
-	p, err := scanPayment(row)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("GetByIdempotencyKey: %w", domain.ErrNotFound)
-		}
-		return nil, fmt.Errorf("GetByIdempotencyKey: %w", err)
-	}
-	return p, nil
-}
 
 func (r *PaymentRepository) UpdateStatus(ctx context.Context, tx *sql.Tx, id uuid.UUID, status domain.PaymentStatus, providerRef *string, failureReason *string, completedAt *time.Time) error {
 	res, err := tx.ExecContext(ctx,

@@ -16,7 +16,6 @@ var SystemUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 type paymentRepo interface {
 	Create(ctx context.Context, tx *sql.Tx, payment *domain.Payment) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Payment, error)
-	GetByIdempotencyKey(ctx context.Context, key string) (*domain.Payment, error)
 }
 
 type accountRepo interface {
