@@ -15,4 +15,5 @@ var (
 	ErrAccountExists     = errors.New("account already exists for this currency")
 	ErrAccountClosed     = errors.New("account closed")
 	ErrCurrencyMismatch  = errors.New("currency mismatch")
+	ErrVersionConflict   = errors.New("optimistic lock conflict")
 )

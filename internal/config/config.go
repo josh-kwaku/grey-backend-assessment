@@ -19,6 +19,11 @@ type Config struct {
 	TxLimitUSD int64 `env:"TX_LIMIT_USD" envDefault:"10000000"`
 	TxLimitEUR int64 `env:"TX_LIMIT_EUR" envDefault:"9000000"`
 	TxLimitGBP int64 `env:"TX_LIMIT_GBP" envDefault:"8000000"`
+
+	DBMaxOpenConns    int `env:"DB_MAX_OPEN_CONNS" envDefault:"25"`
+	DBMaxIdleConns    int `env:"DB_MAX_IDLE_CONNS" envDefault:"10"`
+	DBConnMaxLifetimeS int `env:"DB_CONN_MAX_LIFETIME_S" envDefault:"300"`
+	DBConnMaxIdleTimeS int `env:"DB_CONN_MAX_IDLE_TIME_S" envDefault:"60"`
 }
 
 func Load() (*Config, error) {
