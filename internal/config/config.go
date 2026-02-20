@@ -1,0 +1,30 @@
+package config
+
+import (
+	"fmt"
+
+	env "github.com/caarlos0/env/v11"
+)
+
+type Config struct {
+	DatabaseURL     string  `env:"DATABASE_URL,required"`
+	JWTSecret       string  `env:"JWT_SECRET,required"`
+	FXSpreadPct     float64 `env:"FX_SPREAD_PCT" envDefault:"0.005"`
+	MockProviderURL string  `env:"MOCK_PROVIDER_URL" envDefault:"http://mock-provider:8081"`
+	WebhookSecret   string  `env:"WEBHOOK_SECRET,required"`
+	Port            int     `env:"PORT" envDefault:"8080"`
+	LogLevel        string  `env:"LOG_LEVEL" envDefault:"info"`
+	AppEnv          string  `env:"APP_ENV" envDefault:"production"`
+
+	TxLimitUSD int64 `env:"TX_LIMIT_USD" envDefault:"10000000"`
+	TxLimitEUR int64 `env:"TX_LIMIT_EUR" envDefault:"9000000"`
+	TxLimitGBP int64 `env:"TX_LIMIT_GBP" envDefault:"8000000"`
+}
+
+func Load() (*Config, error) {
+	cfg, err := env.ParseAs[Config]()
+	if err != nil {
+		return nil, fmt.Errorf("config.Load: %w", err)
+	}
+	return &cfg, nil
+}

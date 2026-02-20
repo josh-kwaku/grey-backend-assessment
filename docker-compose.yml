@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: grey
+      POSTGRES_PASSWORD: grey
+      POSTGRES_DB: grey
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grey"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    image: migrate/migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations
+    command:
+      [
+        "-path", "/migrations",
+        "-database", "postgres://grey:grey@postgres:5432/grey?sslmode=disable",
+        "up",
+      ]
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://grey:grey@postgres:5432/grey?sslmode=disable
+      JWT_SECRET: dev-jwt-secret-change-me
+      WEBHOOK_SECRET: dev-webhook-secret-change-me
+      MOCK_PROVIDER_URL: http://mock-provider:8081
+      FX_SPREAD_PCT: "0.005"
+      PORT: "8080"
+      TX_LIMIT_USD: "10000000"
+      TX_LIMIT_EUR: "9000000"
+      TX_LIMIT_GBP: "8000000"
+      LOG_LEVEL: info
+      APP_ENV: production
+
+  mock-provider:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mock-provider
+    ports:
+      - "8081:8081"
+    environment:
+      APP_ENV: production
+
+volumes:
+  pgdata:
