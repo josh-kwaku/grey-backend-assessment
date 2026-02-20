@@ -1,0 +1,745 @@
+openapi: 3.0.3
+info:
+  title: Grey Payment Processing API
+  description: |
+    A fintech payment processing system supporting internal transfers (same and cross-currency),
+    external payouts via mock provider, FX rate quoting, and double-entry ledger accounting.
+
+    ## Authentication
+    All endpoints under `/api/v1/` (except login and webhooks) require a Bearer token in the
+    `Authorization` header. Obtain a token via `POST /api/v1/auth/login`.
+
+    ## Idempotency
+    All `POST` endpoints that create resources require an `Idempotency-Key` header (UUID).
+    Replayed requests with the same key return the cached response with `X-Idempotent-Replayed: true`.
+
+    ## Money
+    All monetary amounts are in **minor units** (e.g. 5000 = $50.00).
+
+    ## Test Credentials
+    | User    | Email              | Password      | Grey Tag  |
+    |---------|-------------------|---------------|-----------|
+    | Alice   | alice@test.com    | password123   | alice     |
+    | Bob     | bob@test.com      | password123   | bob       |
+    | Charlie | charlie@test.com  | password123   | charlie   |
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local (docker-compose)
+
+tags:
+  - name: Health
+    description: Liveness and readiness probes
+  - name: Auth
+    description: Authentication
+  - name: Users
+    description: User profiles
+  - name: Accounts
+    description: Currency accounts
+  - name: Payments
+    description: Internal transfers and external payouts
+  - name: FX
+    description: Foreign exchange rates
+  - name: Webhooks
+    description: Provider webhook callbacks
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      description: Returns ok if the process is running. No auth required.
+      responses:
+        "200":
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: 1.0.0
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      description: Checks database connectivity. Returns 503 if database is unreachable.
+      responses:
+        "200":
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+        "503":
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      description: Authenticate with email and password. Returns a JWT valid for 24 hours.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: alice@test.com
+                password:
+                  type: string
+                  example: password123
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/users/{id}:
+    get:
+      tags: [Users]
+      summary: Get user profile
+      description: Returns the authenticated user's profile. Users can only access their own profile.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/users/{id}/accounts:
+    post:
+      tags: [Accounts]
+      summary: Create currency account
+      description: |
+        Creates a new account in the specified currency. Each user can have one account per currency (USD, EUR, GBP).
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currency]
+              properties:
+                currency:
+                  type: string
+                  enum: [USD, EUR, GBP]
+                  example: USD
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Account"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Account already exists for this currency
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+    get:
+      tags: [Accounts]
+      summary: List accounts
+      description: Returns all accounts belonging to the authenticated user.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      responses:
+        "200":
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Account"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/payments:
+    post:
+      tags: [Payments]
+      summary: Internal transfer
+      description: |
+        Transfer funds to another Grey user by their unique name (grey tag).
+        Supports same-currency and cross-currency transfers. Cross-currency transfers
+        go through the FX pool with an applied spread.
+
+        **Same-currency**: 2 ledger entries (debit sender, credit recipient).
+        **Cross-currency**: 4 ledger entries (debit sender, credit FX pool in source currency,
+        debit FX pool in dest currency, credit recipient).
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recipient_unique_name, source_currency, dest_currency, amount]
+              properties:
+                recipient_unique_name:
+                  type: string
+                  description: Grey tag of the recipient
+                  example: bob
+                source_currency:
+                  type: string
+                  enum: [USD, EUR, GBP]
+                  example: USD
+                dest_currency:
+                  type: string
+                  enum: [USD, EUR, GBP]
+                  example: USD
+                amount:
+                  type: integer
+                  format: int64
+                  description: Amount in minor units (e.g. 5000 = $50.00)
+                  example: 5000
+      responses:
+        "201":
+          description: Transfer completed
+          headers:
+            Location:
+              schema:
+                type: string
+              description: URL of the created payment
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Duplicate payment or idempotency conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Business rule violation (insufficient funds, self-transfer, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/payments/external:
+    post:
+      tags: [Payments]
+      summary: External payout
+      description: |
+        Send funds to an external bank account via IBAN. The payment is created in `pending` status
+        and submitted to the mock provider asynchronously. The provider calls back via webhook
+        to confirm or reject the payout.
+
+        If the payout fails, a reversal is automatically created to return funds to the sender.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_currency, dest_currency, amount, dest_iban, dest_bank_name]
+              properties:
+                source_currency:
+                  type: string
+                  enum: [USD, EUR, GBP]
+                  example: USD
+                dest_currency:
+                  type: string
+                  enum: [USD, EUR, GBP]
+                  example: EUR
+                amount:
+                  type: integer
+                  format: int64
+                  description: Amount in minor units
+                  example: 10000
+                dest_iban:
+                  type: string
+                  description: Destination IBAN
+                  example: DE89370400440532013000
+                dest_bank_name:
+                  type: string
+                  description: Destination bank name
+                  example: Deutsche Bank
+      responses:
+        "202":
+          description: Payout accepted (pending provider confirmation)
+          headers:
+            Location:
+              schema:
+                type: string
+              description: URL of the created payment
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          description: Business rule violation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/payments/{id}:
+    get:
+      tags: [Payments]
+      summary: Get payment
+      description: Returns a payment by ID. Users can only view payments where they are the sender.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Payment details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Payment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/fx/rates:
+    get:
+      tags: [FX]
+      summary: Get FX rate quote
+      description: |
+        Returns the current exchange rate between two currencies, including the mid-market rate,
+        effective rate (with spread applied), and the spread percentage.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [USD, EUR, GBP]
+          example: USD
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [USD, EUR, GBP]
+          example: EUR
+      responses:
+        "200":
+          description: FX rate quote
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/FXQuote"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/webhooks/provider:
+    post:
+      tags: [Webhooks]
+      summary: Receive provider webhook
+      description: |
+        Callback endpoint for the mock payment provider. Authenticated via HMAC-SHA256 signature
+        in the `X-Webhook-Signature` header. Duplicate webhooks (same event_id) are accepted
+        idempotently.
+      parameters:
+        - name: X-Webhook-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+          description: HMAC-SHA256 hex digest of the request body
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event_id, payment_id, status, timestamp]
+              properties:
+                event_id:
+                  type: string
+                  format: uuid
+                payment_id:
+                  type: string
+                  format: uuid
+                status:
+                  type: string
+                  enum: [completed, failed]
+                provider_ref:
+                  type: string
+                reason:
+                  type: string
+                timestamp:
+                  type: string
+                  format: date-time
+      responses:
+        "200":
+          description: Webhook received
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            type: string
+                            enum: [received, already_received]
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          description: Invalid HMAC signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    UserID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: User ID (must match the authenticated user)
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Unique key to ensure exactly-once processing
+
+  responses:
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ErrorEnvelope"
+              - type: object
+                properties:
+                  error:
+                    type: object
+                    properties:
+                      details:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            field:
+                              type: string
+                            message:
+                              type: string
+
+    Unauthorized:
+      description: Missing or invalid authentication token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+    NotFound:
+      description: Resource not found or access denied
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+  schemas:
+    SuccessEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+        error:
+          type: "null"
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        data:
+          type: "null"
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: VALIDATION_FAILED
+            message:
+              type: string
+              example: Validation failed
+            details:
+              nullable: true
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/User"
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        unique_name:
+          type: string
+          nullable: true
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        currency:
+          type: string
+          enum: [USD, EUR, GBP]
+        balance:
+          type: integer
+          format: int64
+          description: Balance in minor units
+        account_number:
+          type: string
+          nullable: true
+        iban:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [active, frozen, closed]
+        created_at:
+          type: string
+          format: date-time
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [internal_transfer, external_payout]
+        status:
+          type: string
+          enum: [pending, processing, completed, failed, reversed]
+        source_account_id:
+          type: string
+          format: uuid
+        dest_account_id:
+          type: string
+          format: uuid
+          nullable: true
+        source_amount:
+          type: integer
+          format: int64
+          description: Amount debited in minor units
+        source_currency:
+          type: string
+        dest_amount:
+          type: integer
+          format: int64
+          description: Amount credited in minor units
+        dest_currency:
+          type: string
+        exchange_rate:
+          type: string
+          nullable: true
+          description: Applied exchange rate (null for same-currency)
+        fee_amount:
+          type: integer
+          format: int64
+        fee_currency:
+          type: string
+          nullable: true
+        dest_iban:
+          type: string
+          nullable: true
+        dest_bank_name:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    FXQuote:
+      type: object
+      properties:
+        from_currency:
+          type: string
+        to_currency:
+          type: string
+        mid_market_rate:
+          type: string
+        effective_rate:
+          type: string
+          description: Rate with spread applied
+        spread_pct:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    ReadinessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, down]
+        timestamp:
+          type: string
+          format: date-time
+        checks:
+          type: object
+          properties:
+            database:
+              type: string
+              enum: [ok, down]

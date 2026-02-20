@@ -1,0 +1,154 @@
+Table users {
+  id            uuid         [pk, default: `gen_random_uuid()`]
+  email         varchar(255) [not null, unique]
+  name          varchar(255) [not null]
+  password_hash varchar(255) [not null, note: 'bcrypt hash for JWT auth']
+  unique_name   varchar(20)  [note: 'grey tag, used for internal transfers. nullable, set after signup. partial unique index (WHERE unique_name IS NOT NULL) allows multiple NULLs.']
+  status        varchar(20)  [not null, default: 'active', note: 'active | suspended | closed']
+  created_at    timestamptz  [not null, default: `now()`]
+
+  note: 'A special system user (seeded) owns the FX pool accounts. Identified by email = system@grey.internal or a known UUID.'
+}
+
+Table accounts {
+  id              uuid         [pk, default: `gen_random_uuid()`]
+  user_id         uuid         [not null, ref: > users.id]
+  currency        char(3)      [not null, note: 'USD | EUR | GBP']
+  account_type    varchar(20)  [not null, default: 'user', note: 'user | fx_pool | outgoing - differentiates user wallets from system accounts']
+
+  // --- Materialized balance (updated atomically with ledger entries) ---
+  balance         bigint       [not null, default: 0, note: 'minor units (cents/pence). CHECK (balance >= 0) for user accounts. Updated in same tx as ledger inserts.']
+  version         bigint       [not null, default: 0, note: 'optimistic locking safety net. incremented on every balance update.']
+
+  account_number  varchar(50)  [note: 'populated by provider on account creation']
+  routing_number  varchar(50)
+  iban            varchar(34)
+  swift_bic       varchar(11)
+  provider        varchar(50)  [note: 'wise | paystack | flutterwave - provider that created this account']
+  provider_ref    varchar(255) [note: 'provider-side reference ID']
+
+  status          varchar(20)  [not null, default: 'active', note: 'pending | active | frozen | closed']
+  created_at      timestamptz  [not null, default: `now()`]
+
+  indexes {
+    (user_id, currency, account_type) [unique, note: 'one account per currency per type per user. allows system user to have fx_pool + outgoing for same currency']
+  }
+
+  note: 'Serves as both wallet (balance) and account metadata (bank details). System user owns 6 accounts: 3 FX pool (conversion intermediary) + 3 outgoing (external payout clearing). CHECK(balance >= 0) applies to all accounts unconditionally. System accounts are seeded with large balances.'
+}
+
+Table payments {
+  id                uuid           [pk, default: `gen_random_uuid()`]
+  idempotency_key   varchar(255)   [not null]
+  type              varchar(30)    [not null, note: 'internal_transfer | external_payout']
+  status            varchar(30)    [not null, default: 'pending', note: 'pending | processing | completed | failed | reversed']
+
+  // --- Source ---
+  source_account_id uuid           [not null, ref: > accounts.id]
+
+  // --- Destination (internal) ---
+  dest_account_id   uuid           [ref: > accounts.id, note: 'populated for internal_transfer. NULL for external_payout.']
+
+  // --- Destination (external) ---
+  dest_account_number varchar(50)  [note: 'populated for external_payout']
+  dest_iban           varchar(34)  [note: 'populated for external_payout']
+  dest_swift_bic      varchar(11)  [note: 'populated for external_payout']
+  dest_bank_name      varchar(255) [note: 'populated for external_payout']
+
+  // --- Amounts & FX ---
+  source_amount     bigint         [not null, note: 'minor units: cents, pence']
+  source_currency   char(3)        [not null, note: 'USD | EUR | GBP']
+  dest_amount       bigint         [not null, note: 'minor units - after FX conversion if cross-currency']
+  dest_currency     char(3)        [not null, note: 'USD | EUR | GBP']
+  exchange_rate     decimal(20,10) [note: 'effective rate applied (mid-market * (1 - spread)). NULL if same-currency.']
+  fee_amount        bigint         [not null, default: 0, note: 'FX spread revenue in dest_currency minor units']
+  fee_currency      char(3)        [note: 'currency of the fee']
+
+  // --- Provider (external payouts) ---
+  provider          varchar(50)    [note: 'mock_provider - simulated external payment rail']
+  provider_ref      varchar(255)   [note: 'reference from mock provider']
+  failure_reason    text           [note: 'populated on failure']
+  metadata          jsonb          [note: 'arbitrary metadata - reference notes, etc.']
+
+  // --- Timestamps ---
+  created_at        timestamptz    [not null, default: `now()`]
+  updated_at        timestamptz    [not null, default: `now()`]
+  completed_at      timestamptz    [note: 'set when status transitions to completed']
+
+  indexes {
+    source_account_id
+    dest_account_id
+    status
+    (idempotency_key, source_account_id) [unique, note: 'same key can be reused across different source accounts']
+  }
+
+  note: 'Trade-off: destination fields live on this table (nullable columns) for pragmatism. A production system would normalize into a payment_destinations table. See ARCHITECTURE.md.'
+}
+
+Table ledger_entries {
+  id             uuid         [pk, default: `gen_random_uuid()`]
+  payment_id     uuid         [not null, ref: > payments.id]
+  account_id     uuid         [not null, ref: > accounts.id]
+  entry_type     varchar(10)  [not null, note: 'debit | credit']
+  amount         bigint       [not null, note: 'always positive; direction indicated by entry_type']
+  currency       char(3)      [not null, note: 'USD | EUR | GBP']
+  balance_before bigint       [not null, note: 'account balance before this entry was applied']
+  balance_after  bigint       [not null, note: 'account balance after this entry was applied']
+  created_at     timestamptz  [not null, default: `now()`]
+
+  indexes {
+    account_id
+    payment_id
+  }
+
+  note: 'Immutable. Never update or delete ledger entries. Cross-currency payments create 4 entries (through FX pool conversion accounts). Same-currency internal transfers create 2 entries. Reversals create new compensating entries.'
+}
+
+Table payment_events {
+  id         uuid         [pk, default: `gen_random_uuid()`]
+  payment_id uuid         [not null, ref: > payments.id]
+  event_type varchar(50)  [not null, note: 'created | processing | completed | failed | reversed']
+  actor      varchar(50)  [not null, note: 'user:<uuid> | system - who triggered the state change']
+  payload    jsonb        [note: 'event-specific data - e.g. failure reason, provider response']
+  created_at timestamptz  [not null, default: `now()`]
+
+  indexes {
+    payment_id
+  }
+
+  note: 'Append-only event log tracking payment state transitions. Enables full audit trail of what happened and when.'
+}
+
+Table webhook_events {
+  id              uuid         [pk, default: `gen_random_uuid()`]
+  idempotency_key varchar(255) [not null, unique, note: 'hash of event payload to prevent duplicate processing']
+  event_type      varchar(50)  [not null, note: 'payment.completed | payment.failed']
+  payload         jsonb        [not null]
+  status          varchar(20)  [not null, default: 'pending', note: 'pending | dispatched | failed']
+  attempts        int          [not null, default: 0]
+  last_attempt    timestamptz
+  created_at      timestamptz  [not null, default: `now()`]
+
+  indexes {
+    status
+  }
+
+  note: 'Outbox pattern. Incoming webhook events from the mock external provider land here first. A background processor picks them up, updates payment status, creates ledger entries, and marks them dispatched. Prevents duplicate processing via idempotency_key.'
+}
+
+Table idempotency_cache {
+  idempotency_key varchar(255) [not null, note: 'client-provided key from Idempotency-Key header']
+  user_id         uuid         [not null]
+  request_hash    varchar(64)  [not null, note: 'SHA-256 of method + path + body. Used to detect conflicting payloads for the same key.']
+  status_code     int          [not null]
+  response_body   bytea        [not null]
+  created_at      timestamptz  [not null, default: `now()`]
+  expires_at      timestamptz  [not null, note: '24-hour TTL']
+
+  indexes {
+    (idempotency_key, user_id) [pk]
+    expires_at
+  }
+
+  note: 'Caches HTTP responses for idempotent POST endpoints. Scoped per user so different users can use the same key independently. Entries expire after 24 hours.'
+}

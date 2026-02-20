@@ -71,8 +71,6 @@ func (p webhookPayload) eventType() domain.WebhookEventType {
 	return domain.WebhookEventTypePaymentFailed
 }
 
-var ErrInvalidSignature = &AppError{http.StatusUnauthorized, "INVALID_SIGNATURE", "Webhook signature is invalid"}
-
 func (h *WebhookHandler) ReceiveProviderWebhook(w http.ResponseWriter, r *http.Request) {
 	log := logging.FromContext(r.Context())
 

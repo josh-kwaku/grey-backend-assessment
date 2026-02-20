@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/josh-kwaku/grey-backend-assessment/docs"
 	"github.com/josh-kwaku/grey-backend-assessment/internal/config"
 	"github.com/josh-kwaku/grey-backend-assessment/internal/fx"
 	"github.com/josh-kwaku/grey-backend-assessment/internal/handler"
@@ -71,14 +71,18 @@ func main() {
 	paymentHandler := handler.NewPaymentHandler(paymentSvc)
 	fxHandler := handler.NewFXHandler(fxSvc)
 	webhookHandler := handler.NewWebhookHandler(webhookEventRepo, cfg.WebhookSecret)
+	healthHandler := handler.NewHealthHandler(db)
 
 	authMW := middleware.Auth(cfg.JWTSecret)
 	idempotencyMW := middleware.Idempotency(idempotencyRepo)
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /health", handleHealth)
-	mux.HandleFunc("GET /health/ready", handleHealth)
+	mux.HandleFunc("GET /docs", handler.ServeDocs())
+	mux.HandleFunc("GET /docs/openapi.yaml", handler.ServeSpec(docs.OpenAPISpec))
+
+	mux.HandleFunc("GET /health", healthHandler.Liveness)
+	mux.HandleFunc("GET /health/ready", healthHandler.Readiness)
 	mux.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
 
 	mux.Handle("GET /api/v1/users/{id}", authMW(http.HandlerFunc(userHandler.GetByID)))
@@ -93,7 +97,7 @@ func main() {
 
 	mux.HandleFunc("POST /api/v1/webhooks/provider", webhookHandler.ReceiveProviderWebhook)
 
-	stack := middleware.Tracing(middleware.Logging(middleware.Recovery(mux)))
+	stack := middleware.SecureHeaders(middleware.Tracing(middleware.Logging(middleware.Recovery(mux))))
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	srv := &http.Server{
@@ -137,11 +141,4 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("server stopped")
-}
-
-func handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
-		slog.Error("failed to write health response", "error", err)
-	}
 }

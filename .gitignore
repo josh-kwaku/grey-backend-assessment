@@ -5,8 +5,11 @@ SESSION.md
 PROGRESS.md
 ISSUES.md
 
-# Documentation (excluded for now)
-docs/
+docs/*
+!docs/ARCHITECTURE.md
+!docs/openapi.yaml
+!docs/embed.go
+!docs/db_design.dbml
 
 # Go binaries
 /api

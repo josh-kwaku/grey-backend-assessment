@@ -34,4 +34,5 @@ var (
 	ErrMissingIdempotencyKey    = &AppError{http.StatusBadRequest, "MISSING_IDEMPOTENCY_KEY", "Idempotency-Key header is required"}
 	ErrIdempotencyConflict      = &AppError{http.StatusConflict, "IDEMPOTENCY_CONFLICT", "Idempotency key already used with a different request"}
 	ErrInvalidAmount            = &AppError{http.StatusBadRequest, "INVALID_AMOUNT", "Amount must be greater than zero"}
+	ErrInvalidSignature         = &AppError{http.StatusUnauthorized, "INVALID_SIGNATURE", "Webhook signature is invalid"}
 )
