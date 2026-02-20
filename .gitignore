@@ -1,0 +1,35 @@
+# Claude Code
+.claude/
+CLAUDE.md
+SESSION.md
+PROGRESS.md
+ISSUES.md
+
+# Documentation (excluded for now)
+docs/
+
+# Go
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
