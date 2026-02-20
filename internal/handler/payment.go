@@ -1,0 +1,169 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+
+	"github.com/josh-kwaku/grey-backend-assessment/internal/auth"
+	"github.com/josh-kwaku/grey-backend-assessment/internal/domain"
+	"github.com/josh-kwaku/grey-backend-assessment/internal/logging"
+	"github.com/josh-kwaku/grey-backend-assessment/internal/service/payment"
+)
+
+type paymentService interface {
+	CreateInternalTransfer(ctx context.Context, req payment.InternalTransferRequest) (*domain.Payment, bool, error)
+	GetPaymentForUser(ctx context.Context, paymentID, userID uuid.UUID) (*domain.Payment, error)
+}
+
+type PaymentHandler struct {
+	payments paymentService
+}
+
+func NewPaymentHandler(payments paymentService) *PaymentHandler {
+	return &PaymentHandler{payments: payments}
+}
+
+type createPaymentRequest struct {
+	RecipientUniqueName string `json:"recipient_unique_name"`
+	SourceCurrency      string `json:"source_currency"`
+	DestCurrency        string `json:"dest_currency"`
+	Amount              int64  `json:"amount"`
+}
+
+func (r createPaymentRequest) Validate() []FieldError {
+	var errs []FieldError
+
+	if r.RecipientUniqueName == "" {
+		errs = append(errs, FieldError{Field: "recipient_unique_name", Message: "required"})
+	}
+
+	if r.SourceCurrency == "" {
+		errs = append(errs, FieldError{Field: "source_currency", Message: "required"})
+	} else if !domain.Currency(r.SourceCurrency).IsValid() {
+		errs = append(errs, FieldError{Field: "source_currency", Message: "must be USD, EUR, or GBP"})
+	}
+
+	if r.DestCurrency == "" {
+		errs = append(errs, FieldError{Field: "dest_currency", Message: "required"})
+	} else if !domain.Currency(r.DestCurrency).IsValid() {
+		errs = append(errs, FieldError{Field: "dest_currency", Message: "must be USD, EUR, or GBP"})
+	}
+
+	if r.Amount <= 0 {
+		errs = append(errs, FieldError{Field: "amount", Message: "must be greater than 0"})
+	}
+
+	return errs
+}
+
+type paymentDTO struct {
+	ID              uuid.UUID        `json:"id"`
+	Type            string           `json:"type"`
+	Status          string           `json:"status"`
+	SourceAccountID uuid.UUID        `json:"source_account_id"`
+	DestAccountID   *uuid.UUID       `json:"dest_account_id"`
+	SourceAmount    int64            `json:"source_amount"`
+	SourceCurrency  string           `json:"source_currency"`
+	DestAmount      int64            `json:"dest_amount"`
+	DestCurrency    string           `json:"dest_currency"`
+	ExchangeRate    *decimal.Decimal `json:"exchange_rate"`
+	FeeAmount       int64            `json:"fee_amount"`
+	CreatedAt       time.Time        `json:"created_at"`
+	CompletedAt     *time.Time       `json:"completed_at,omitempty"`
+}
+
+func toPaymentDTO(p *domain.Payment) paymentDTO {
+	return paymentDTO{
+		ID:              p.ID,
+		Type:            string(p.Type),
+		Status:          string(p.Status),
+		SourceAccountID: p.SourceAccountID,
+		DestAccountID:   p.DestAccountID,
+		SourceAmount:    p.SourceAmount,
+		SourceCurrency:  string(p.SourceCurrency),
+		DestAmount:      p.DestAmount,
+		DestCurrency:    string(p.DestCurrency),
+		ExchangeRate:    p.ExchangeRate,
+		FeeAmount:       p.FeeAmount,
+		CreatedAt:       p.CreatedAt,
+		CompletedAt:     p.CompletedAt,
+	}
+}
+
+func (h *PaymentHandler) Create(w http.ResponseWriter, r *http.Request) {
+	log := logging.FromContext(r.Context())
+
+	userID, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		RespondAppError(w, ErrMissingToken, nil)
+		return
+	}
+
+	idempotencyKey := r.Header.Get("Idempotency-Key")
+	if idempotencyKey == "" {
+		RespondAppError(w, ErrMissingIdempotencyKey, nil)
+		return
+	}
+
+	var req createPaymentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		RespondAppError(w, ErrInvalidRequest, nil)
+		return
+	}
+
+	if fields := req.Validate(); len(fields) > 0 {
+		RespondValidationError(w, fields)
+		return
+	}
+
+	p, created, err := h.payments.CreateInternalTransfer(r.Context(), payment.InternalTransferRequest{
+		SenderUserID:        userID,
+		RecipientUniqueName: req.RecipientUniqueName,
+		SourceCurrency:      domain.Currency(req.SourceCurrency),
+		DestCurrency:        domain.Currency(req.DestCurrency),
+		Amount:              req.Amount,
+		IdempotencyKey:      idempotencyKey,
+	})
+	if err != nil {
+		log.Warn("payment creation failed", "error", err)
+		RespondDomainError(w, err)
+		return
+	}
+
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+		w.Header().Set("Location", fmt.Sprintf("/api/v1/payments/%s", p.ID))
+	}
+
+	RespondSuccess(w, status, toPaymentDTO(p))
+}
+
+func (h *PaymentHandler) Get(w http.ResponseWriter, r *http.Request) {
+	userID, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		RespondAppError(w, ErrMissingToken, nil)
+		return
+	}
+
+	paymentID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		RespondAppError(w, ErrResourceNotFound, nil)
+		return
+	}
+
+	p, err := h.payments.GetPaymentForUser(r.Context(), paymentID, userID)
+	if err != nil {
+		logging.FromContext(r.Context()).Warn("payment lookup failed", "error", err)
+		RespondDomainError(w, err)
+		return
+	}
+
+	RespondSuccess(w, http.StatusOK, toPaymentDTO(p))
+}

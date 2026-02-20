@@ -30,5 +30,8 @@ var (
 	ErrInvalidCurrency   = &AppError{http.StatusBadRequest, "INVALID_CURRENCY", "Invalid currency"}
 	ErrAccountClosed     = &AppError{http.StatusUnprocessableEntity, "ACCOUNT_CLOSED", "Account is closed"}
 	ErrCurrencyMismatch  = &AppError{http.StatusUnprocessableEntity, "CURRENCY_MISMATCH", "Currency mismatch"}
-	ErrVersionConflict   = &AppError{http.StatusConflict, "VERSION_CONFLICT", "Resource was modified concurrently, please retry"}
+	ErrVersionConflict          = &AppError{http.StatusConflict, "VERSION_CONFLICT", "Resource was modified concurrently, please retry"}
+	ErrMissingIdempotencyKey    = &AppError{http.StatusBadRequest, "MISSING_IDEMPOTENCY_KEY", "Idempotency-Key header is required"}
+	ErrInvalidAmount            = &AppError{http.StatusBadRequest, "INVALID_AMOUNT", "Amount must be greater than zero"}
+	ErrCrossCurrencyUnsupported = &AppError{http.StatusUnprocessableEntity, "CROSS_CURRENCY_UNSUPPORTED", "Cross-currency transfers not yet supported"}
 )

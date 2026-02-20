@@ -105,12 +105,13 @@ func scanPayment(s scanner) (*domain.Payment, error) {
 	var destAccountID uuid.NullUUID
 	var exchangeRate decimal.NullDecimal
 	var feeCurrency *string
+	var metadata *[]byte
 
 	err := s.Scan(
 		&p.ID, &p.IdempotencyKey, &p.Type, &p.Status, &p.SourceAccountID,
 		&destAccountID, &p.DestAccountNumber, &p.DestIBAN, &p.DestSwiftBIC, &p.DestBankName,
 		&p.SourceAmount, &p.SourceCurrency, &p.DestAmount, &p.DestCurrency, &exchangeRate,
-		&p.FeeAmount, &feeCurrency, &p.Provider, &p.ProviderRef, &p.FailureReason, &p.Metadata,
+		&p.FeeAmount, &feeCurrency, &p.Provider, &p.ProviderRef, &p.FailureReason, &metadata,
 		&p.CreatedAt, &p.UpdatedAt, &p.CompletedAt,
 	)
 	if err != nil {
@@ -126,6 +127,9 @@ func scanPayment(s scanner) (*domain.Payment, error) {
 	if feeCurrency != nil {
 		c := domain.Currency(*feeCurrency)
 		p.FeeCurrency = &c
+	}
+	if metadata != nil {
+		p.Metadata = *metadata
 	}
 
 	return &p, nil
