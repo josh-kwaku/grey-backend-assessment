@@ -78,12 +78,12 @@ func (s *RateService) GetRate(_ context.Context, from, to domain.Currency) (*Quo
 	}, nil
 }
 
-func (s *RateService) Convert(_ context.Context, amount int64, from, to domain.Currency) (*Conversion, error) {
+func (s *RateService) Convert(ctx context.Context, amount int64, from, to domain.Currency) (*Conversion, error) {
 	if amount <= 0 {
 		return nil, fmt.Errorf("Convert: %w", domain.ErrInvalidAmount)
 	}
 
-	quote, err := s.GetRate(context.Background(), from, to)
+	quote, err := s.GetRate(ctx, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("Convert: %w", err)
 	}

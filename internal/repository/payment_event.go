@@ -58,12 +58,16 @@ func (r *PaymentEventRepository) GetByPaymentID(ctx context.Context, paymentID u
 
 func scanPaymentEvent(s scanner) (*domain.PaymentEvent, error) {
 	var e domain.PaymentEvent
+	var payload *[]byte
 	err := s.Scan(
 		&e.ID, &e.PaymentID, &e.EventType, &e.Actor,
-		&e.Payload, &e.CreatedAt,
+		&payload, &e.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if payload != nil {
+		e.Payload = *payload
 	}
 	return &e, nil
 }
