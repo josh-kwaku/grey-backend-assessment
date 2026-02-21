@@ -8,6 +8,37 @@ Multi-currency payment processing system for the Grey backend take-home assessme
 
 This system handles two core payment flows: internal transfers between platform users (same-currency and cross-currency) and external payouts to bank accounts via a mock provider. All money movement is recorded through double-entry bookkeeping, and external payouts follow an async webhook-based reconciliation model.
 
+### System Diagram
+
+```mermaid
+graph TB
+    Client["Client / API Consumer"]
+
+    subgraph compose["Docker Compose Network"]
+        subgraph api["API Server · port 8080"]
+            MW["Middleware\nAuth · Idempotency · Logging · Security"]
+            H["Handlers\nAuth · Account · Payment · FX · Webhook · Health"]
+            S["Services\nPayment · Account · FX Rate"]
+            R["Repositories\nUser · Account · Payment · Ledger · Idempotency"]
+            WP["Webhook Processor\n(background goroutine)"]
+        end
+
+        MP["Mock Payment Provider\nport 8081"]
+        PG[("PostgreSQL 16\nport 5432")]
+        MIG["Migrate\n(run & exit)"]
+    end
+
+    Client -- "HTTP / JSON" --> MW
+    MW --> H
+    H --> S
+    S --> R
+    R -- "SQL transactions" --> PG
+    S -- "POST /process\nsubmit payout" --> MP
+    MP -. "POST /webhooks/provider\nHMAC-SHA256 callback" .-> H
+    WP -- "poll pending\nwebhook events" --> PG
+    MIG -- "schema migrations" --> PG
+```
+
 ---
 
 ## Core Design Decisions
